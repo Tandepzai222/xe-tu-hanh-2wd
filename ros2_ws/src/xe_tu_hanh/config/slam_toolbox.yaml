@@ -1,0 +1,106 @@
+# ============================================================================
+#  slam_toolbox.yaml — cấu hình SLAM 2D (online asynchronous)
+#
+#  Chạy:  ros2 launch xe_tu_hanh slam.launch.py
+#  Lưu bản đồ:  ros2 run nav2_map_server map_saver_cli -f ~/maps/nha
+#
+#  YÊU CẦU TRƯỚC KHI CHẠY:
+#    1. Robot đã chạy `robot.launch.py` và có TF đầy đủ:
+#         map -> odom (do slam_toolbox phát)
+#         odom -> base_footprint (do EKF phát)
+#         base_footprint -> laser_frame (do robot_state_publisher phát)
+#    2. Đã có topic /scan (từ LiDAR).
+#    3. Đã hiệu chuẩn xong odometry (docs/07 GĐ 2–3).
+#
+#  ⚠️ SLAM KHÔNG THỂ BÙ ĐƯỢC ODOMETRY TỒI.
+#     Nếu odometry sai 10%, bản đồ sẽ bị cong/vặn xoắn và không có tham số
+#     nào ở đây cứu được. Việc hiệu chuẩn ở GĐ 2–3 là bắt buộc trước.
+# ============================================================================
+
+slam_toolbox:
+  ros__parameters:
+
+    # ---------------- Chế độ ----------------
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ---------------- Hệ quy chiếu ----------------
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping                       # mapping | localization
+
+    # ---------------- TF & thời gian ----------------
+    # ⚠️ transform_timeout phải LỚN HƠN độ trễ thực của dữ liệu LiDAR.
+    #    Với RPLIDAR A1 qua USB trên Pi 4: ~0.1–0.2 s.
+    transform_timeout: 0.3
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000          # 40 MB — cần cho bản đồ lớn
+    enable_interactive_mode: true        # cho phép sửa bản đồ bằng RViz
+
+    # ---------------- Tần số xử lý ----------------
+    throttle_scans: 1                    # 1 = dùng mọi scan; 2 = bỏ 1 nửa
+    minimum_time_interval: 0.1           # ⚠️ quan trọng: tối thiểu 0.1 s giữa
+                                         #    2 lần thêm nút. Nhỏ hơn → chậm,
+                                         #    lớn hơn → bản đồ thưa, dễ trượt.
+    map_update_interval: 2.0             # chu kỳ phát /map (s)
+    resolution: 0.05                     # ⚠️ 5 cm/ô. Nhỏ hơn = chi tiết hơn
+                                         #    nhưng tốn RAM gấp 4 mỗi lần giảm nửa.
+    max_laser_range: 12.0                # ⚠️ PHẢI khớp tầm xa thực của LiDAR
+                                         #    (RPLIDAR A1 = 12 m). Đặt sai → SLAM
+                                         #    cố khớp các điểm rác ngoài tầm.
+    min_laser_range: 0.20
+
+    # ---------------- Khớp scan (scan matching) ----------------
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.10        # ⚠️ 10 cm mới thêm nút mới.
+    minimum_travel_heading: 0.15         # ⚠️ ~8.6° mới thêm nút mới.
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    do_loop_closing: true
+    loop_search_maximum_distance: 3.0
+
+    # ---------------- Tinh chỉnh khớp ----------------
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ---------------- Bộ lọc chất lượng scan ----------------
+    # ⚠️ Loại bỏ chùm tia max-range: tia không trúng vật (trả về max range)
+    #    KHÔNG chứa thông tin "có vật ở đó", nhưng SLAM lại tưởng là tường.
+    #    Đây là nguyên nhân số 1 làm bản đồ bị "phình" ra ngoài.
+    minimum_travel_distance_factor: 0.5
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+
+    # ---------------- Tối ưu đồ thị ----------------
+    # ⚠️ Nếu bản đồ bị "nhảy" mỗi khi loop closure kích hoạt, giảm
+    #    solver iterations xuống, hoặc tắt do_loop_closing.
+    solver_iterations: 100
+
+    # ---------------- Chế độ localization (khi đã có bản đồ) ----------------
+    # Đổi `mode: localization` và trỏ tới file bản đồ đã lưu ở trên.
+    map_file_name: ""
+    map_start_pose: [0.0, 0.0, 0.0]
+    map_start_at_dock: false
+
+    debug_logging: false
+    publish_period_sec: 1.0

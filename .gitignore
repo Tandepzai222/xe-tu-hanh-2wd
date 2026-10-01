@@ -1,0 +1,7 @@
+.pio/
+build/
+install/
+log/
+*.csv
+*.bag
+__pycache__/

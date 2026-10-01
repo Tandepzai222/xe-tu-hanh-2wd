@@ -1,0 +1,95 @@
+# ============================================================================
+#  ekf.yaml — robot_localization EKF cho robot 2 bánh vi sai, mặt phẳng
+#
+#  Chạy:  ros2 launch xe_tu_hanh robot.launch.py    (đã include EKF)
+#  Kiểm tra: ros2 run tf2_tools view_frames.py
+#
+#  ⚠️⚠️⚠️  QUY TẮC SỐ 1 CỦA ROBOT_LOCALIZATION  ⚠️⚠️⚠️
+#  CHỈ ĐƯỢC CÓ MỘT NGUỒN PHÁT MỖI CẠNH TF.
+#  File này bật `publish_tf: true` → EKF phát `odom -> base_footprint`.
+#  VÌ VẬY phải chạy udp_bridge với `publish_tf:=false`:
+#
+#      ros2 run xe_tu_hanh udp_bridge --ros-args -p publish_tf:=false
+#
+#  Nếu cả hai cùng phát, TF sẽ nhảy qua lại giữa hai giá trị → RViz giật,
+#  Nav2 mất định vị, robot đi loạn. Đây là lỗi phổ biến nhất khi mới học.
+# ============================================================================
+
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0                  # tần số EKF (Hz). 30 là đủ cho robot chậm.
+    sensor_timeout: 0.5              # mất cảm biến lâu hơn → EKF bỏ qua nó
+    two_d_mode: true                 # ⚠️ BẮT BUỘC cho robot mặt phẳng.
+                                     #    Ép z, roll, pitch = 0 và bỏ các
+                                     #    thành phần vận tốc không tồn tại.
+
+    # ---------------- Hệ quy chiếu ----------------
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom                # ⚠️ = odom khi chưa có SLAM/AMCL.
+                                     #    Khi chạy Nav2 với map, đổi thành map.
+    publish_tf: true
+
+    # ---------------- Nguồn 1: Odometry bánh xe ----------------
+    # ⚠️ ĐỌC KỸ: ta CHỈ lấy VẬN TỐC (vx, vyaw) từ odometry bánh xe,
+    #    TUYỆT ĐỐI KHÔNG lấy x, y.
+    #
+    #    Lý do: x, y của odometry là tích phân của vận tốc → trôi vô hạn
+    #    (không có phép đo tuyệt đối nào hiệu chỉnh). Nếu nạp x,y vào EKF,
+    #    EKF sẽ "tin" một nguồn ngày càng sai và kéo cả ước lượng đi sai.
+    #    Vận tốc thì khác: nó là phép đo TỨC THỜI, sai số không tích luỹ.
+    #
+    #    Thứ tự 15 phần tử:
+    #    x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+    odom0: /odom
+    odom0_config: [false, false, false,     # x, y, z      -> KHÔNG dùng
+                   false, false, false,     # roll, pitch  -> không
+                   false,                  # yaw          -> KHÔNG (bánh xe bị trượt)
+                   true,  false, false,     # vx  ✅       -> nguồn chính
+                   false, false,           # vroll, vpitch
+                   true,                   # vyaw ✅      -> nguồn chính
+                   false, false, false]     # gia tốc      -> không có
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 5
+    odom0_nodelay: true                # bỏ qua hàng đợi TF, dùng stamp trực tiếp
+
+    # ---------------- Nguồn 2: IMU ----------------
+    # ⚠️ LƯU Ý VỀ YAW: yaw của IMU ở đây là tích phân gyro (không có magnetometer)
+    #    nên vẫn trôi, chỉ chậm hơn odometry. Vì vậy hiệp phương sai yaw được đặt
+    #    lớn (0.08) trong udp_bridge.py để EKF không tin tuyệt đối.
+    #
+    #    NẾU BẠN THẤY ROBOT QUAY BỊ LỆCH DẦN: đặt `true` ở vị trí yaw thành
+    #    `false` bên dưới → EKF chỉ dùng vyaw từ gyro (ổn định hơn nhiều).
+    imu0: /imu/data
+    imu0_config: [false, false, false,     # x, y, z      -> IMU không đo vị trí
+                  false, false, true,      # roll, pitch = false; yaw ✅
+                  false, false, false,     # vx, vy, vz
+                  false, false, true,      # vroll, vpitch = false; vyaw ✅
+                  true,  false, false]     # ax ✅ (giúp phát hiện trượt/va chạm)
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_nodelay: true
+    imu0_remove_gravitational_acceleration: true   # ⚠️ phải true, nếu không
+                                                   #    ax sẽ luôn ~9.8 m/s²
+
+    # ---------------- Nhiễu quá trình ----------------
+    # Nhỏ = tin mô hình chuyển động; Lớn = tin cảm biến hơn.
+    # Robot nhỏ, bánh cao su hay trượt → để hơi lớn ở vyaw.
+    process_noise_covariance: [0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25, 0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25, 0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25]

@@ -1,0 +1,209 @@
+<?xml version="1.0"?>
+<!--
+  xe_tu_hanh.urdf.xacro — Mô hình hình học của robot.
+
+  ⚠️ CÁC SỐ NÀY PHẢI KHỚP TUYỆT ĐỐI VỚI config.h CỦA FIRMWARE.
+     Nếu `WHEEL_TRACK_M` trong firmware khác `wheel_track` ở đây, TF sẽ
+     "nói dối" → RViz hiển thị laser lệch → Nav2 lập kế hoạch đâm vào tường.
+
+  Quy ước trục (REP-103):
+      x = tiến, y = sang TRÁI, z = lên
+      yaw dương = quay ngược chiều kim đồng hồ (nhìn từ trên xuống)
+-->
+<robot name="xe_tu_hanh" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==================== THAM SỐ CƠ KHÍ ==================== -->
+  <xacro:property name="wheel_diameter"  value="0.065"/>   <!-- D = 65 mm -->
+  <xacro:property name="wheel_radius"    value="${wheel_diameter/2}"/>
+  <xacro:property name="wheel_track"     value="0.185"/>   <!-- L = 185 mm, TÂM-TÂM -->
+  <xacro:property name="wheel_width"     value="0.026"/>
+  <xacro:property name="wheel_mass"      value="0.045"/>
+
+  <xacro:property name="chassis_len"     value="0.150"/>
+  <xacro:property name="chassis_wid"     value="0.120"/>
+  <xacro:property name="chassis_hgt"     value="0.045"/>
+  <xacro:property name="chassis_mass"    value="0.400"/>
+
+  <!-- Chiều cao trục bánh so với mặt đất = bán kính bánh -->
+  <xacro:property name="axle_height"     value="${wheel_radius}"/>
+
+  <!-- Vị trí LiDAR (gắn trên đỉnh cột). ĐO THỰC TẾ RỒI SỬA!
+       Sai số ở đây trực tiếp làm lệch bản đồ. -->
+  <xacro:property name="lidar_x"         value="0.020"/>
+  <xacro:property name="lidar_y"         value="0.000"/>
+  <xacro:property name="lidar_z"         value="${chassis_hgt + 0.085}"/>
+
+  <!-- Vị trí IMU (đặt gần tâm quay để giảm gia tốc ly tâm) -->
+  <xacro:property name="imu_x"           value="0.000"/>
+  <xacro:property name="imu_y"           value="0.000"/>
+  <xacro:property name="imu_z"           value="0.005"/>
+
+  <!-- ==================== VẬT LIỆU ==================== -->
+  <material name="xam">   <color rgba="0.4 0.4 0.4 1.0"/></material>
+  <material name="den">   <color rgba="0.1 0.1 0.1 1.0"/></material>
+  <material name="do">    <color rgba="0.8 0.1 0.1 1.0"/></material>
+  <material name="xanh">  <color rgba="0.1 0.3 0.8 1.0"/></material>
+
+  <!-- ==================== MACRO QUÁN TÍNH ==================== -->
+  <xacro:macro name="khoi_hop" params="mass x y z">
+    <inertial>
+      <mass value="${mass}"/>
+      <origin xyz="0 0 0"/>
+      <inertia
+        ixx="${mass*(y*y+z*z)/12.0}" ixy="0" ixz="0"
+        iyy="${mass*(x*x+z*z)/12.0}" iyz="0"
+        izz="${mass*(x*x+y*y)/12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="khoi_tru" params="mass radius length">
+    <inertial>
+      <mass value="${mass}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <!-- trụ quay quanh trục y (bánh xe nằm ngang) -->
+      <inertia
+        ixx="${mass*(3*radius*radius + length*length)/12.0}" ixy="0" ixz="0"
+        iyy="${mass*radius*radius/2.0}" iyz="0"
+        izz="${mass*(3*radius*radius + length*length)/12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ==================================================================
+       base_footprint — gốc quy chiếu trên MẶT ĐẤT (z = 0)
+       Đây là frame mà Nav2 dùng để lập kế hoạch (bỏ qua chiều cao).
+       ================================================================== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${axle_height}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================================================================
+       base_link — thân robot, gốc tại TÂM TRỤC BÁNH
+       ================================================================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${chassis_hgt/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/>
+      </geometry>
+      <material name="xam"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${chassis_hgt/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/>
+      </geometry>
+    </collision>
+    <xacro:khoi_hop mass="${chassis_mass}"
+                    x="${chassis_len}" y="${chassis_wid}" z="${chassis_hgt}"/>
+  </link>
+
+  <!-- ==================== BÁNH TRÁI ==================== -->
+  <joint name="wheel_left_joint" type="continuous">
+    <parent link="base_link"/>
+    <child  link="wheel_left_link"/>
+    <origin xyz="0 ${wheel_track/2} 0" rpy="${-pi/2} 0 0"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.02" friction="0.05"/>
+  </joint>
+
+  <link name="wheel_left_link">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="den"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <xacro:khoi_tru mass="${wheel_mass}"
+                    radius="${wheel_radius}" length="${wheel_width}"/>
+  </link>
+
+  <!-- ==================== BÁNH PHẢI ==================== -->
+  <joint name="wheel_right_joint" type="continuous">
+    <parent link="base_link"/>
+    <child  link="wheel_right_link"/>
+    <origin xyz="0 ${-wheel_track/2} 0" rpy="${-pi/2} 0 0"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.02" friction="0.05"/>
+  </joint>
+
+  <link name="wheel_right_link">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="den"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <xacro:khoi_tru mass="${wheel_mass}"
+                    radius="${wheel_radius}" length="${wheel_width}"/>
+  </link>
+
+  <!-- ==================== BÁNH CASTER (bị động) ====================
+       Trong URDF nó là link CỐ ĐỊNH — chỉ để hiển thị và mô tả hình học.
+       Đây là điểm yếu của mô hình: bánh caster thực tế trượt ngang khi quay,
+       gây sai số odometry mà mô hình vi sai không mô tả được.
+       ================================================================== -->
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="caster_link"/>
+    <origin xyz="${-(chassis_len/2 - 0.020)} 0 ${-axle_height + 0.0125}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="caster_link">
+    <visual>
+      <geometry><sphere radius="0.0125"/></geometry>
+      <material name="do"/>
+    </visual>
+    <collision>
+      <geometry><sphere radius="0.0125"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.020"/>
+      <inertia ixx="1.3e-6" ixy="0" ixz="0" iyy="1.3e-6" iyz="0" izz="1.3e-6"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== IMU ==================== -->
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link">
+    <visual>
+      <geometry><box size="0.020 0.016 0.003"/></geometry>
+      <material name="xanh"/>
+    </visual>
+    <inertial>
+      <mass value="0.005"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== LiDAR ====================
+       Frame này chỉ được dùng khi đã gắn LiDAR (GĐ 6). Trước đó vô hại.
+       ============================================== -->
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="laser_frame"/>
+    <origin xyz="${lidar_x} ${lidar_y} ${lidar_z}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="laser_frame">
+    <visual>
+      <geometry><cylinder radius="0.030" length="0.040"/></geometry>
+      <material name="den"/>
+    </visual>
+    <inertial>
+      <mass value="0.170"/>
+      <inertia ixx="8e-5" ixy="0" ixz="0" iyy="8e-5" iyz="0" izz="8e-5"/>
+    </inertial>
+  </link>
+
+</robot>
